@@ -57,6 +57,7 @@ const char *disc= &ENG[0];                  // not-constant pointer to a constan
 const uint8_t nDisc = 5;                    //total number of disciplines
 int discIndex = 1;                          //discipline ID 
 uint8_t color[3] = {55, 55, 55};         //char array holding {R,G,B} components of the color respectively
+uint8_t intensity = 10;                  //intensity ranging from 1-10
 
 int letterIndex = 0;                                                  //index keeping track of which letter is currently being edited
 uint8_t row, column = 0;
@@ -67,7 +68,7 @@ bool mode = 0;                                                   //variable keep
 bool encPush_old, push1_old, push2_old, encA_old, encB_old;               // old values of the inputs, internally pulled up so = 1
 bool encPush_new, push1_new, push2_new, encA_new, encB_new;
 int buttonIncrement, encIncrement = 0;    //values storing direction of scrolling of letter/discipline given by inputs
-const float t = 10;                         //time step of 10ms
+const float t = 5;                         //time step of 10ms
 
 
 void ledOut(uint8_t r, uint8_t g, uint8_t b){
@@ -152,6 +153,15 @@ void checkLetterIndex(){
   }
 }
 
+void checkIntensity(){
+  if (intensity>10){
+    intensity = 10;
+  }
+  else if (intensity <1){
+    intensity = 1;
+  }
+}
+
 void writeString(const char *text, uint8_t size =1){
   //displays name and discipline on the display, starting at the x, y cursor position
   //Characters that won't fit onto the display will be clipped.
@@ -204,6 +214,36 @@ void vibrate(){
   delay(100);
 }
 
+void intensityAdjust(){
+  if ((color[0] - 25)<0){
+    color[0] = 0;
+  }
+  else if((color[0]+25)>255){
+    color[0] = 255;
+  }
+  else{
+    color[0] = color[0] + encIncrement * 25;
+  }
+  if ((color[1] - 25)<0){
+    color[1] = 0;
+  }
+  else if((color[1]+25)>255){
+    color[1] = 255;
+  }
+  else{
+    color[1] = color[1] + encIncrement * 25;
+  }
+  if ((color[2] - 25)<0){
+    color[2] = 0;
+  }
+  else if((color[2]+25)>255){
+    color[2] = 255;
+  }
+  else{
+  color[2] = color[2] + encIncrement * 25;
+  }
+}
+
 bool fallingEdge(bool old_value, bool new_value){
   if(old_value == 1 && new_value == 0){
     return true;
@@ -212,18 +252,15 @@ bool fallingEdge(bool old_value, bool new_value){
 }
 
 int encRead(){
-  bool encA_new = digitalRead(ENC_A);
-  bool encB_new = digitalRead(ENC_B);
-  if ((encA_old == 0 && encA_new == 1 && encB_new == 0) or (encB_old == 0 && encB_new == 1 && encA_new == 1) or 
-  (encA_old == 1 && encA_new == 0 && encB_new == 1) or (encB_old == 1 && encB_new == 0 && encA_new == 0)){
+  if ((encA_old == 0 && encA_new == 1 && digitalRead(ENC_B) == 0) or (encA_old == 1 && encA_new == 0 && digitalRead(ENC_B) == 1)){
     return 1;
   }
-  if ((encA_old == 1 && encA_new == 0 && encB_new == 0) or (encB_old == 0 && encB_new == 1 && encA_new == 0) or 
-  (encA_old == 0 && encA_new == 1 && encB_new == 1) or (encB_old == 1 && encB_new == 0 && encA_new == 1)){
+  else if ((encA_old == 1 && encA_new == 0 && digitalRead(ENC_B) == 0) or (encA_old == 0 && encA_new == 1 && digitalRead(ENC_B) == 1)){
     return -1;
   }
   return 0;           //return 0 if no condition is met
 }
+
 
 void setup(){
 // initializes the pins
@@ -252,8 +289,8 @@ void setup(){
 //  pinMode(NFC_FD, INPUT);
 //  pinMode(SENSE_BAT, INPUT);
 
-    encPush_old = push1_old = push2_old = encA_old = encB_old = 1;
-    encPush_new = push1_new = push2_new = encA_new = encB_new = 1;
+    encPush_old = push1_old = push2_old = encA_old = 1;
+    encPush_new = push1_new = push2_new = encA_new = 1;
     
     Serial.begin(9600);
 
@@ -273,10 +310,15 @@ void loop(){
     push1_new = digitalRead(PUSHB_1);
     push2_new = digitalRead(PUSHB_2);
     encA_new = digitalRead(ENC_A);
-    encB_new = digitalRead(ENC_B);
     
     if (fallingEdge(encPush_old, encPush_new)){
       mode = !mode;
+      if(mode){
+        ledOut(0,0,0);
+      }
+      else{
+        ledOut(color[0],color[1],color[2]);
+      }
     }
     if (fallingEdge(push1_old, push1_new)){
       buttonIncrement += 1;
@@ -286,29 +328,32 @@ void loop(){
     }
     
     encIncrement = encRead();
-    
-    // mode for scrolling through the disciplines and colors
-    if(mode == 0){                             
-      discIndex +=buttonIncrement;
-      checkIndex();                           //make sure the index is within the range of disciplines
-      updateData(discIndex);                  //update the discipline and color accordingly
-      ledOut(color[0], color[1], color[2]);   //display the color on LED
-    }
 
-    //mode for editing the name
-    else{
-      letterIndex += buttonIncrement;
-      checkLetterIndex();
-      row = letterIndex/maxlength;
-      column = letterIndex%maxlength;
-      username[row][column] += encIncrement;
-      ledOut(0,0,0); 
+    if (buttonIncrement!=0 || encIncrement!=0){         //if there is an input
+      
+      // mode for scrolling through the disciplines and colors
+      if(mode == 0){                          
+        discIndex +=buttonIncrement;
+        checkIndex();                           //make sure the index is within the range of disciplines
+        updateData(discIndex);                  //update the discipline and color accordingly
+        ledOut(color[0], color[1], color[2]);
+  //      intensity += encIncrement;
+  //      checkIntensity();
+  //      ledOut((intensity*color[0])/10, (intensity*color[1])/10, (intensity*color[2])/10);   //display the color on LED
+      }
+  
+      //mode for editing the name
+      else{
+        letterIndex += buttonIncrement;
+        checkLetterIndex();
+        row = letterIndex/maxlength;
+        column = letterIndex%maxlength;
+        username[row][column] += encIncrement; 
+      }
+  
+      displayNameDisc();                      //comment out for debugging
+      //button_values();                      //used for debugging
     }
-
-    displayNameDisc();                      //comment out for debugging
-    //button_values();                      //used for debugging
-    
-    
 
     //update input values
     encPush_old = encPush_new;
@@ -322,30 +367,27 @@ void loop(){
 
 void button_values(){
   display.clearDisplay();
+  char red[4], blue[4], green[4];
+  red[0] = color[0]/100 + '0';
+  red[1] = (color[0]%100)/10 +'0';
+  red[2] = color[0]%10 + '0';
+  green[0] = color[1]/100 + '0';
+  green[1] = (color[1]%100)/10 +'0';
+  green[2] = color[1]%10 + '0';
+  blue[0] = color[2]/100 + '0';
+  blue[1] = (color[2]%100)/10 +'0';
+  blue[2] = color[2]%10 + '0';
+  red[3]=green[3]=blue[3]='\0';
   
-  display.setCursor(0, 0);  
-  if (encPush_new == 1){            
-  writeString("1",2);
-  }
-  else {
-    writeString("0",2);
-  }
+  
+  display.setCursor(0, 0);             
+  writeString(red,2);
+
   display.setCursor(0,20);
+  writeString(green,2);
   
-  if (push1_new == 1){            
-  writeString("1",2);
-  }
-  else {
-    writeString("0",2);
-  }
-  
-  display.setCursor(0,40);
-  if (push2_new == 1){            
-  writeString("1",2);
-  }
-  else {
-    writeString("0",2);
-  }
+  display.setCursor(0,40);            
+  writeString(blue,2);
   
   display.display();  
 }
