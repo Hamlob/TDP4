@@ -145,11 +145,11 @@ void checkIndex(){
 void checkLetterIndex(){
   //updates LetterIndex value so that it is in range defined by maxlength of the name
 
-  if (letterIndex > 2*maxlength){
+  if (letterIndex > 2*maxlength-1){
     letterIndex = 0;
   }
   else if (letterIndex < 0){
-    letterIndex = 2*maxlength;
+    letterIndex = 2*maxlength-1;
   }
 }
 
@@ -317,7 +317,7 @@ void loop(){
         ledOut(0,0,0);
       }
       else{
-        ledOut(color[0],color[1],color[2]);
+        ledOut((intensity*color[0])/10, (intensity*color[1])/10, (intensity*color[2])/10);   //display the color on LED
       }
     }
     if (fallingEdge(push1_old, push1_new)){
@@ -336,10 +336,10 @@ void loop(){
         discIndex +=buttonIncrement;
         checkIndex();                           //make sure the index is within the range of disciplines
         updateData(discIndex);                  //update the discipline and color accordingly
-        ledOut(color[0], color[1], color[2]);
-  //      intensity += encIncrement;
-  //      checkIntensity();
-  //      ledOut((intensity*color[0])/10, (intensity*color[1])/10, (intensity*color[2])/10);   //display the color on LED
+        //ledOut(color[0], color[1], color[2]);
+        intensity += encIncrement;
+        checkIntensity();
+        ledOut((intensity*color[0])/10, (intensity*color[1])/10, (intensity*color[2])/10);   //display the color on LED
       }
   
       //mode for editing the name
