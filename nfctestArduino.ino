@@ -1,9 +1,20 @@
 #include <stdio.h>
 #include <SPI.h>
 #include <Wire.h>
-#include <Encoder.h>
+
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <Encoder.h>
+
+#include <ntag.h>
+#include <ntagadapter.h>
+#include <ntageepromadapter.h>
+#include <ntagsramadapter.h>
+
+#include "ntageepromadapter.h"
+#define HARDI2C
+
+
 
 // defining pins and creating display + encoder objects
 #define SCREEN_WIDTH 128        // OLED display width, in pixels
@@ -17,7 +28,8 @@
 
 #define SCREEN_ADDRESS 0x3C ///< See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32(0x3D doesnt work)
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-  
+Ntag ntag(Ntag::NTAG_I2C_1K,2,5);
+NtagEepromAdapter ntagAdapter(&ntag);
 
 //#define UART_CTS RESET        //uart header
 //#define UART_RX 0
@@ -107,7 +119,7 @@ void checkIntensity(){
     intensity = 1;
   }
 }
-
+*/
 void writeString(const char *text, uint8_t size =1){
   //displays name and discipline on the display, starting at the x, y cursor position
   //Characters that won't fit onto the display will be clipped.
@@ -211,6 +223,7 @@ void setup(){
     ledOut(color[0], color[1], color[2]);
     disc = &EEE[0];
     displayNameDisc();
+ntagAdapter.begin();
 }
 
 
@@ -226,8 +239,19 @@ void loop(){
 
     
     if (fallingEdge(encPush_old, encPush_new)){
-      wire.begin(0x55)
+      
+     NdefMessage message = NdefMessage();
+      message.addUriRecord("http://arduino.cc");
+    display.clearDisplay();
+    display.setCursor(0, 0);              
     
+   
+      if (ntagAdapter.write(message)) {
+        writeString("success",2);
+      } else {
+        writeString("fail",2);
+      }
+      display.display();
       
       /*mode = !mode;
       if(mode){
