@@ -31,9 +31,9 @@ NtagEepromAdapter ntagAdapter(&ntag);
 #define ENC_A A2                //encoder inputs (dig)
 #define ENC_B A1
 
-uint8_t color[3] = {55, 55, 55};         //char array holding {R,G,B} components of the color respectively
-uint8_t intensity = 10;                  //intensity ranging from 1-10
-
+//uint8_t color[3] = {55, 55, 55};         //char array holding {R,G,B} components of the color respectively
+//uint8_t intensity = 10;                  //intensity ranging from 1-10
+int inByte = 0;
 bool encPush_old, push1_old, push2_old, encA_old, encB_old;               // old values of the inputs, internally pulled up so = 1
 bool encPush_new, push1_new, push2_new, encA_new, encB_new;
 int buttonIncrement, encIncrement = 0;    //values storing direction of scrolling of letter/discipline given by inputs
@@ -67,6 +67,10 @@ void ledOut(uint8_t r, uint8_t g, uint8_t b){
   return;
 }
 void setup(){
+  Serial.begin(9600);
+   while (!Serial) {
+  }
+
 // initializes the pins
 
 //  pinMode(UART_CTS, OUTPUT);
@@ -92,16 +96,22 @@ void setup(){
 //  pinMode(SPI_MISO, INPUT);
 //  pinMode(NFC_FD, INPUT);
 //  pinMode(SENSE_BAT, INPUT);
-
+   
     encPush_old = push1_old = push2_old = encA_old = 1;
     encPush_new = push1_new = push2_new = encA_new = 1;
 
 ledOut(255,255,255);
 
+  //ntagAdapter.begin();
+
 }
 
 void loop(){
-
+    /*if (Serial.available() > 0) {
+      inByte = Serial.read();
+      Serial.print(char(inByte));
+      //Serial.println("responding");
+    }*/
 
     buttonIncrement = 0;
     encIncrement = 0;
@@ -126,14 +136,20 @@ void loop(){
 
 
     if (buttonIncrement!=0 || encIncrement!=0){         //if there is an input
+      ntagAdapter.begin();
       ledOut(0, 255, 0);
+      Serial.println("initiating write");
       delay(2000);
+      
       NdefMessage message = NdefMessage();
       message.addUriRecord("http://arduino.cc");
+      
       if (ntagAdapter.write(message)) {
         ledOut(0,0,255);
+        Serial.println("success");
       } else {
         ledOut(255, 0, 0);
+        Serial.println("failed");
       }
       delay(2000);
       ledOut(255,255,255);
