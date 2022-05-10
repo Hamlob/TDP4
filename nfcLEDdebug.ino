@@ -11,7 +11,9 @@
 #include "ntageepromadapter.h"
 #define HARDI2C
 
-Ntag ntag(Ntag::NTAG_I2C_1K,2,5);
+//Ntag ntag(Ntag::NTAG_I2C_1K,2,5);
+
+Ntag ntag(Ntag::NTAG_I2C_1K,7,9);
 NtagEepromAdapter ntagAdapter(&ntag);
 
 //#define I2C_SDA A4            //NFC header
