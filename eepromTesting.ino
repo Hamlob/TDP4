@@ -6,6 +6,7 @@ String command;
 byte serialOutputBuffer[100];
 int bufferPointer = 0;
 byte storedText[100];
+bool isShowingEmail = false;
 Ntag ntag(Ntag::NTAG_I2C_1K, 7, 9);
 NtagSramAdapter ntagAdapter(&ntag);
 
@@ -70,27 +71,14 @@ int parseText(byte* data, byte size, bool isNDEF, bool doPrint = false, int Pack
   for (int i = start; i < size; i++) { //skips first bit of the register 0x06 which is still header
     if (findEmail) {
       if (data[i - 1] == 0x7C) { //if | character, email found!
-        Serial.println("found it");
         bufferPointer = 0; //write over stored name with email
-
-        /*serialOutputBuffer[bufferPointer] = data[i];
-          reachedEmailYet = true;
-          Serial.println("set true");
-          continue; //avoids adding | into email string
-          }
-          if (reachedEmailYet == false) { //if looking for email section and separating char | not reached yet
-          Serial.println("in not found if");
-          Serial.println();
-          //Serial.println("looking for |");
-          continue; //skip as haven't reached email portion of string yet
-          }*/
       }
     }
 
     serialOutputBuffer[bufferPointer] = data[i];
     if (data[i] == 0xFE) { //if ndef text end character
-      
-      for (int i = bufferPointer+1; i < 100; i++) { //purges remainder of old buffer
+
+      for (int i = bufferPointer + 1; i < 100; i++) { //purges remainder of old buffer
         serialOutputBuffer[i] = 0;
       }
       if (doPrint) {
@@ -223,8 +211,8 @@ void preserveName() {
 
   //showBlockInHex(serialOutputBuffer, 100);
   //showBlockInHex(storedText, 100);
-  for (int i = 0; i < 100; i++) {
-    if (serialOutputBuffer[i] != storedText[i]) {
+  for (int i = 0; i < (bufferPointer+1); i++) { //change 100 to bufferPointer?
+    if ((serialOutputBuffer[i] != storedText[i]) || (serialOutputBuffer[i] == 0) ) { //was & and !=
       newText = !newText;
       break;
     }
@@ -248,23 +236,60 @@ void preserveName() {
     //readMemory();
   }
 }
-void showEmail() {
+void toggleShowEmail(bool show) {
   byte customNdefTextHeader[9] = {0x03, 0x00, 0xD1, 0x01, 0x00, 0x54, 0x02, 0x65, 0x6E};
   readText(false, true, 0x30, true);
-  customNdefTextHeader[1]=bufferPointer+7;//from NDEF text standard
-  customNdefTextHeader[4]=bufferPointer+3;
+  customNdefTextHeader[1] = bufferPointer + 7; //from NDEF text standard
+  customNdefTextHeader[4] = bufferPointer + 3;
   //showBlockInHex(serialOutputBuffer, 100);
+  //showBlockInHex(customNdefTextHeader, 9);
+  byte writeData[16];
+  bool finished = false;
+  int packetCounter = 0;
   //showBlockInHex(storedText, 100);
-  Serial.println(bufferPointer,HEX);
-  if (ntag.writeEeprom(0, customNdefTextHeader, 9)) {
-    //Serial.println("New Name Stored");
+  //Serial.println(bufferPointer, HEX);
+
+  if (show) {
+    Serial.println("Email now showing");
+    bufferPointer = 0;
+    for (int i = 0; i < 16; i++) {  //generates first packet including header
+      if (i < 9) {
+        writeData[i] = customNdefTextHeader[i];
+      } else {
+        writeData[i] = serialOutputBuffer[bufferPointer];
+        bufferPointer += 1;
+      }
+    }
+    if (ntag.writeEeprom(0, writeData, 16)) { //writes first packet
+      packetCounter += 1;
+    }
+    while (!finished) {
+      for (int j = 0; j < 16; j++) { //generates further packets
+        if (finished) {
+          writeData[j] = 0;
+          continue;
+        }
+        writeData[j] = serialOutputBuffer[bufferPointer];
+        if (serialOutputBuffer[bufferPointer] == 0xFE) {
+          finished = true;
+        }
+        bufferPointer += 1;
+      }
+      if (ntag.writeEeprom(16 * packetCounter, writeData, 16)) { //writes remaining packets
+        packetCounter += 1;
+      }
+    }
+  } else {
+    Serial.println("Email now hidden");
+    erase(0, 109, false);
   }
-  if (ntag.writeEeprom(9, serialOutputBuffer, 100)) {
+  /*
+    if (ntag.writeEeprom(9, serialOutputBuffer, 109)) {
     //Serial.println("New Name Stored");
-  }else{
+    }else{
     Serial.println("write failed");
-  }
-  //readMemory();
+    }
+    //readMemory();*/
 }
 
 void setup() {
@@ -285,8 +310,9 @@ void loop() {
   byte eepromdata[2 * 16];
 
 
+
   fd_new = !digitalRead(NFC_FD); //active low
-  if (fallingEdge(fd_old, fd_new)) { //if nfc field removed i.e process finished
+  if (fallingEdge(fd_old, fd_new) && (!isShowingEmail)) { //if nfc field removed i.e process finished and not showing email, update
     preserveName();
   }
   fd_old = fd_new;
@@ -301,7 +327,8 @@ void loop() {
       readText(true, true, 0x30);
     }
     if (command.equals("email")) {
-      showEmail();
+      isShowingEmail = !isShowingEmail;
+      toggleShowEmail(isShowingEmail);
     }
 
     else if (command.equals("memory")) {
