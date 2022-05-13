@@ -1,5 +1,6 @@
 #include <ntagsramadapter.h>
 #include "Arduino.h"
+#include <arduino-timer.h>
 #define HARDI2C
 #include <Wire.h>
 String command;
@@ -9,8 +10,12 @@ byte storedText[100];
 bool isShowingEmail = false;
 Ntag ntag(Ntag::NTAG_I2C_1K, 7, 9);
 NtagSramAdapter ntagAdapter(&ntag);
-
+auto timer = timer_create_default();
 #define NFC_FD 2
+#define PUSHB_1 4             //button inputs
+#define PUSHB_2 7
+bool push1_old, push2_old;               // old values of the inputs, internally pulled up so = 1
+bool push1_new, push2_new;
 bool fd_old, fd_new;
 bool fallingEdge(bool old_value, bool new_value) {
   if (old_value == 1 && new_value == 0) {
@@ -87,7 +92,7 @@ int parseText(byte* data, byte size, bool isNDEF, bool doPrint = false, int Pack
       return i; //return pointer to end char
     }
     bufferPointer += 1;
-    if (bufferPointer==100){ //break if reached end of buffer without finding anything
+    if (bufferPointer == 100) { //break if reached end of buffer without finding anything
       return 0xFF; //return nothing found code
     }
     if (doPrint) {
@@ -190,11 +195,11 @@ int readText(bool doPrint = true, bool isNDEF = true, int addr = 0x0, bool findE
   while (endPointer == 0) {
     if (ntag.readEeprom(16 * packetCounter, readeeprom, 16)) {
       endPointer = parseText(readeeprom, 16, isNDEF, doPrint, packetCounter, findEmail);
-      if (endPointer == 0xFF){ // if nothing found
+      if (endPointer == 0xFF) { // if nothing found
         return 0xFF;
       }
       packetCounter += 1;
-      if (packetCounter == 0x38) { //if nothing found 
+      if (packetCounter == 0x38) { //if nothing found
         Serial.println("No text found");
         //readComplete = true;
       }
@@ -210,12 +215,12 @@ int readText(bool doPrint = true, bool isNDEF = true, int addr = 0x0, bool findE
 
 void preserveName() {
   //byte localTextHeader[9] = {0xB0, 0x0B, 0x1E, 0x5B, 0x00, 0xB1, 0x35, 0x69, 0x69};
-        
+
   //Serial.println("entered preserve name");
   byte readeeprom[9];
   bool newText = false;
   int endPointer = readText(false, true, 0x0); //reads memory to find text, updating the buffer string, returns end pointer
-  if (endPointer==0xFF){ //if no new text has been written, skip
+  if (endPointer == 0xFF) { //if no new text has been written, skip
     //Serial.println("skipping rest of preserve name, no tag found");
     return;
   }
@@ -223,7 +228,7 @@ void preserveName() {
   //Serial.println(endPointer, HEX);
   //showBlockInHex(serialOutputBuffer, 100);
   //showBlockInHex(storedText, 100);
-  for (int i = 0; i < (bufferPointer+1); i++) { //change 100 to bufferPointer?
+  for (int i = 0; i < (bufferPointer + 1); i++) { //change 100 to bufferPointer?
     if ((serialOutputBuffer[i] != storedText[i]) && (serialOutputBuffer[i] != 0) ) { //was & and !=
       //Serial.println("different");
       newText = !newText;
@@ -250,8 +255,9 @@ void preserveName() {
     //readMemory();
   }
 }
-void toggleShowEmail(bool show) {
+bool toggleShowEmail(void *) {
   byte customNdefTextHeader[9] = {0x03, 0x00, 0xD1, 0x01, 0x00, 0x54, 0x02, 0x65, 0x6E};
+  isShowingEmail = !isShowingEmail;
   readText(false, true, 0x30, true);
   customNdefTextHeader[1] = bufferPointer + 7; //from NDEF text standard
   customNdefTextHeader[4] = bufferPointer + 3;
@@ -263,7 +269,7 @@ void toggleShowEmail(bool show) {
   //showBlockInHex(storedText, 100);
   //Serial.println(bufferPointer, HEX);
 
-  if (show) {
+  if (isShowingEmail) {
     Serial.println("Email now showing");
     bufferPointer = 0;
     for (int i = 0; i < 16; i++) {  //generates first packet including header
@@ -304,11 +310,15 @@ void toggleShowEmail(bool show) {
     Serial.println("write failed");
     }
     //readMemory();*/
+  return false; //tells timer not to repeat
 }
 
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(9600);
+  pinMode(PUSHB_1, INPUT_PULLUP);
+  pinMode(PUSHB_2, INPUT_PULLUP);
+
   Serial.println("start");
   if (!ntag.begin()) {
     Serial.println("Can't find ntag");
@@ -322,13 +332,23 @@ void loop() {
   //int packetCounter = 0;
   //bool readComplete = 0;
   byte eepromdata[2 * 16];
+  timer.tick();
 
-
-
+  push1_new = digitalRead(PUSHB_1);
+  push2_new = digitalRead(PUSHB_2);
   fd_new = !digitalRead(NFC_FD); //active low
   if (fallingEdge(fd_old, fd_new) && (!isShowingEmail)) { //if nfc field removed i.e process finished and not showing email, update
     preserveName();
   }
+
+  
+  if (fallingEdge(push1_old, push1_new) && (!isShowingEmail)) { //if nfc field removed i.e process finished and not showing email, update
+    timer.in(0, toggleShowEmail); //show email for 10 seconds
+    timer.in(10000, toggleShowEmail);
+  }
+
+  push1_old = push1_new;
+  push2_old = push2_new;
   fd_old = fd_new;
 
 
@@ -340,10 +360,17 @@ void loop() {
     if (command.equals("read")) {
       readText(true, true, 0x30);
     }
-    if (command.equals("email")) {
-      isShowingEmail = !isShowingEmail;
-      toggleShowEmail(isShowingEmail);
-    }
+
+    /*
+      if (command.equals("email")) {
+      Serial.println("toggling show email");
+      //isShowingEmail = !isShowingEmail;
+      //toggleShowEmail(isShowingEmail);
+      //toggleShowEmail(true);
+      //toggleShowEmail();
+      timer.in(0, toggleShowEmail);
+      timer.in(10000, toggleShowEmail);
+      }*/
 
     else if (command.equals("memory")) {
       readMemory();
@@ -370,5 +397,5 @@ void loop() {
     }
     command = "";
   }
-  delay(1000);
+  delay(5);
 }
