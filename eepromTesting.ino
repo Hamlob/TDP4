@@ -63,14 +63,14 @@ void readMemory() {
 
 int parseText(byte* data, byte size, bool isNDEF, bool doPrint = false, int PacketCount = 0, bool findEmail = false) {
   int start = 0;
-  //bool reachedEmailYet = false;
+  //Serial.println("entered parseText");
   if (isNDEF && PacketCount == 0) { // if reading NDEF, skip header information
     start = 9;
   }
 
   for (int i = start; i < size; i++) { //skips first bit of the register 0x06 which is still header
     if (findEmail) {
-      if (data[i - 1] == 0x7C) { //if | character, email found!
+      if (data[i - 1] == 0x7C) { //if | character, email found! //issue with getting 0-1th element?
         bufferPointer = 0; //write over stored name with email
       }
     }
@@ -87,6 +87,9 @@ int parseText(byte* data, byte size, bool isNDEF, bool doPrint = false, int Pack
       return i; //return pointer to end char
     }
     bufferPointer += 1;
+    if (bufferPointer==100){ //break if reached end of buffer without finding anything
+      return 0xFF; //return nothing found code
+    }
     if (doPrint) {
       Serial.print((char)data[i]);
     }
@@ -184,12 +187,14 @@ int readText(bool doPrint = true, bool isNDEF = true, int addr = 0x0, bool findE
   byte readeeprom[16];
   int packetCounter = addr;
   int endPointer = 0;
-
   while (endPointer == 0) {
     if (ntag.readEeprom(16 * packetCounter, readeeprom, 16)) {
       endPointer = parseText(readeeprom, 16, isNDEF, doPrint, packetCounter, findEmail);
+      if (endPointer == 0xFF){ // if nothing found
+        return 0xFF;
+      }
       packetCounter += 1;
-      if (packetCounter == 0x38) { //if nothing found
+      if (packetCounter == 0x38) { //if nothing found 
         Serial.println("No text found");
         //readComplete = true;
       }
@@ -205,18 +210,27 @@ int readText(bool doPrint = true, bool isNDEF = true, int addr = 0x0, bool findE
 
 void preserveName() {
   //byte localTextHeader[9] = {0xB0, 0x0B, 0x1E, 0x5B, 0x00, 0xB1, 0x35, 0x69, 0x69};
+        
+  //Serial.println("entered preserve name");
   byte readeeprom[9];
   bool newText = false;
   int endPointer = readText(false, true, 0x0); //reads memory to find text, updating the buffer string, returns end pointer
-
+  if (endPointer==0xFF){ //if no new text has been written, skip
+    //Serial.println("skipping rest of preserve name, no tag found");
+    return;
+  }
+  //Serial.print("endPointer:");
+  //Serial.println(endPointer, HEX);
   //showBlockInHex(serialOutputBuffer, 100);
   //showBlockInHex(storedText, 100);
   for (int i = 0; i < (bufferPointer+1); i++) { //change 100 to bufferPointer?
-    if ((serialOutputBuffer[i] != storedText[i]) || (serialOutputBuffer[i] == 0) ) { //was & and !=
+    if ((serialOutputBuffer[i] != storedText[i]) && (serialOutputBuffer[i] != 0) ) { //was & and !=
+      //Serial.println("different");
       newText = !newText;
       break;
     }
   }
+  //delay(1000); //for debugging to delay crash. REMOVE
   if (newText) {
     erase(endPointer + 1, 109, false);
     for (int j = 0; j < 100; j++) {
