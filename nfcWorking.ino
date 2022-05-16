@@ -268,7 +268,6 @@ void setup() {
 }
 
 void loop() {
-  byte eepromdata[2 * 16];
   timer.tick();
   LEDtimer.tick();
 
