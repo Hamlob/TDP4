@@ -32,15 +32,6 @@ byte storedText[100];
 bool isShowingEmail = false;
 
 
-//debug
-
-uint8_t rBaseLevel = 255;
-uint8_t gBaseLevel = 50;
-uint8_t bBaseLevel = 150;
-
-float r = 255;
-float g = 255;
-float b = 255;
 
 bool fallingEdge(bool old_value, bool new_value) {
   return (old_value == 1 && new_value == 0);
