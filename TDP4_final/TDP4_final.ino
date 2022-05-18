@@ -72,6 +72,8 @@ const uint8_t maxlength = 20;                                             //maxi
 
 char username[maxlength + 1] = {"Peter Konecny       "};      //column length must account for string end character
 
+const char mode_text[4][6] = {"Badge","Batt","Email","Snake"};
+bool showMenu = 1;                                                  //decides wheter the menu should be showing or not
 uint8_t mode = 0;                                                   //variable keeping track of which mode the device is in; 0 for adjusting discpline, 1 for editing name
 bool encPush_old, push1_old, push2_old, encA_old, encB_old;               // old values of the inputs, internally pulled up so = 1
 bool encPush_new, push1_new, push2_new, encA_new, encB_new;
@@ -146,6 +148,7 @@ uint8_t scranPosY = 0;
 // scores variables
 long playscore = 0;
 long highscore = 30;  // set high score to 3 collect as a starting point
+
 
 
 //---------------------------------NFC FUNCTIONS--------------------------------------------------
@@ -614,8 +617,8 @@ void waitForPress()
     display.display();
     waiting = digitalRead(PUSHB_1) && digitalRead(PUSHB_2);  // if any of the keys is pressed, its value goes to 0 and PUSHB1&&PUSHB2 will be 0 too
     if (fallingEdge(encPush_old, encPush_new)) {
-      mode = 0;
-      displayNameDisc();
+      showMenu = 1;
+      displayMenu();
       waiting = 0;
     }
     snake_dir = 0;      // reset button press to no direction
@@ -866,7 +869,7 @@ uint8_t batPercent(uint16_t value) {
   Serial.println(value, DEC);
   uint8_t bat_percent;
   if (analog_value < 3.0) {
-    bat_percent = 10;
+    bat_percent = 1;
   }
   else if (analog_value < 3.6) {                                         // 3.0-3.6 represents 0-10% range and is mostly linear
     bat_percent = 1 + ((analog_value - 3.0) / (3.6 - 3.0)) * 10;
@@ -903,6 +906,50 @@ void displayNetwork() {
   writeString(network_text);
   display.display();
 }
+
+void displayMenu(){
+  display.clearDisplay();
+  display.drawRect(2, 1, 58, 14, SSD1306_WHITE);          //mode 0 rectangle
+  display.drawRect(64, 1, 58, 14, SSD1306_WHITE);          //mode 1 rectangle
+  display.drawRect(64, 16, 58, 14, SSD1306_WHITE);          //mode 2 rectangle
+  display.drawRect(2, 16, 58, 14, SSD1306_WHITE);          //mode 3 rectangle
+  
+  if (mode <2){
+    display.fillRect(2 + 62*(mode%2), 1 + 15*(mode/2), 58, 14, SSD1306_WHITE);
+  }
+  else if (mode == 2){
+    display.fillRect(64, 16, 58, 14, SSD1306_WHITE);
+  }
+  else{
+    display.fillRect(2, 16, 58, 14, SSD1306_WHITE);
+  }
+  
+  display.setTextColor(SSD1306_INVERSE);
+  display.setCursor(15,3);
+  writeString(mode_text[0]);
+  display.setCursor(75,3);
+  writeString(mode_text[1]);
+  display.setCursor(15,18);
+  writeString(mode_text[3]);
+  display.setCursor(75,18);
+  writeString(mode_text[2]);
+  display.display();
+  
+}
+
+
+void updateMode(int increment) {
+  if ((mode + increment)> 3) {
+    mode = 0;
+  }
+  else if (mode + increment < 0) {
+    mode = 3;
+  }
+  else{
+    mode += increment;
+  }
+}
+
 
 //----------MAIN------------------------------------------------------------------------------------------
 //--------------------------------------------------------------------------------------------------------
@@ -953,14 +1000,16 @@ void setup() {
 
   displaySetup();         //setups the display
   Serial.println("display setup");
-  ledOut(color[0], color[1], color[2]);
-  Serial.println("leds done");
+  //ledOut(color[0], color[1], color[2]);
+  //Serial.println("leds done");
   disc = &EEE[0];
-  displayNameDisc();
-  Serial.println("name displayed");
+  //displayNameDisc();
+  displayMenu();
+  Serial.println("menu displayed");
 
 
 }
+
 
 
 void loop() {
@@ -975,34 +1024,42 @@ void loop() {
 
 
   if (fallingEdge(encPush_old, encPush_new)) {
-    mode += 1;
+    showMenu = !showMenu;
     vibrate_twice();
-    if (mode != 2 && isShowingEmail){
-      toggleShowEmail();
-      isShowingEmail = !isShowingEmail;
+    ledOut(0, 0, 0);
+    if (showMenu){
+      displayMenu();
     }
-    if (mode == 0) {
-      preserveName();
-      displayNameDisc();
-    }
-    else if (mode == 1) {
-      bat_new = batPercent(analogRead(SENSE_BAT));
-      displayBat(bat_new);
-    }
-    else if (mode == 2) {
-      toggleShowEmail();
-      isShowingEmail = !isShowingEmail;
-      displayNetwork();
-      //      ledOscillate(); or maybe leave in loop?
-    }
-    else if (mode == 3) {
-      game_running = 0;
-    }
-    else {
-      mode = 0;
-      displayNameDisc();
+    else{
+      if (mode != 2 && isShowingEmail){
+        toggleShowEmail();
+        isShowingEmail = !isShowingEmail;
+      }
+      if (mode == 0) {
+        preserveName();
+        displayNameDisc();
+        ledOut((intensity * color[0]) / 10, (intensity * color[1]) / 10, (intensity * color[2]) / 10); //display the color on LED
+      }
+      else if (mode == 1) {
+        bat_new = batPercent(analogRead(SENSE_BAT));
+        displayBat(bat_new);
+      }
+      else if (mode == 2) {
+        toggleShowEmail();
+        isShowingEmail = !isShowingEmail;
+        displayNetwork();
+        //      ledOscillate(); or maybe leave in loop?
+      }
+      else if (mode == 3) {
+        game_running = 0;
+      }
+      else {
+        mode = 0;
+        displayNameDisc();
+      }
     }
   }
+  
   if (fallingEdge(push1_old, push1_new)) {
     buttonIncrement += 1;
   }
@@ -1031,71 +1088,83 @@ void loop() {
   //  }
 
 
-  // mode for displaying name and discipline
-  if (mode == 0) {
-    if (buttonIncrement != 0 || encIncrement != 0) {    //if there is an input
-
-      //edit mode; LED OFF
-      //      if (edit) {
-      //        letterIndex += buttonIncrement;
-      //        checkLetterIndex();
-      //        row = letterIndex / maxlength;
-      //        column = letterIndex % maxlength;
-      //        username[row][column] += encIncrement;
-      //      }
-
-      //display only mode; LED ON
-      //      else {
-      vibrate(1);
-      discIndex += buttonIncrement;
-      checkIndex();                           //make sure the index is within the range of disciplines
-      updateData(discIndex);                  //update the discipline and color accordingly
-      updateIntensity(encIncrement);
-      ledOut((intensity * color[0]) / 10, (intensity * color[1]) / 10, (intensity * color[2]) / 10); //display the color on LED
-      //      }
-      displayNameDisc();                      //comment out for debugging
-      //button_values();                      //used for debugging
-    }
-
-    //polling in main mode
-    fd_new = !digitalRead(NFC_FD); //active low
-    if (fallingEdge(fd_old, fd_new) && (!isShowingEmail)) { //if nfc field removed i.e process finished and not showing email, update
-      preserveName();
+//showing menu
+  if (showMenu){
+    if (encIncrement !=0){
+      updateMode(encIncrement);
+      displayMenu();
     }
   }
 
-  //mode for displaying battery
-  else if (mode == 1) {
-    if (count > 2000) {
-      bat_new = batPercent(analogRead(SENSE_BAT));
-      if (bat_new != bat_old) {
-        displayBat(bat_new);
-        bat_old = bat_new;
+//one of the MODEs selected
+  else{  
+ 
+    // mode for displaying name and discipline
+    if (mode == 0) {
+      if (buttonIncrement != 0 || encIncrement != 0) {    //if there is an input
+  
+        //edit mode; LED OFF
+        //      if (edit) {
+        //        letterIndex += buttonIncrement;
+        //        checkLetterIndex();
+        //        row = letterIndex / maxlength;
+        //        column = letterIndex % maxlength;
+        //        username[row][column] += encIncrement;
+        //      }
+  
+        //display only mode; LED ON
+        //      else {
+        vibrate(1);
+        discIndex += buttonIncrement;
+        checkIndex();                           //make sure the index is within the range of disciplines
+        updateData(discIndex);                  //update the discipline and color accordingly
+        updateIntensity(encIncrement);
+        ledOut((intensity * color[0]) / 10, (intensity * color[1]) / 10, (intensity * color[2]) / 10); //display the color on LED
+        //      }
+        displayNameDisc();                      //comment out for debugging
+        //button_values();                      //used for debugging
+      }
+  
+      //polling in main mode
+      fd_new = !digitalRead(NFC_FD); //active low
+      if (fallingEdge(fd_old, fd_new) && (!isShowingEmail)) { //if nfc field removed i.e process finished and not showing email, update
+        preserveName();
       }
     }
-  }
-
-  //snake mode
-  else if (mode == 3) {
-    if (game_running) {
-      updateGame();
-      snake_dir += buttonIncrement;
-      dir_check();
+  
+    //mode for displaying battery
+    else if (mode == 1) {
+      if (count > 2000) {
+        bat_new = batPercent(analogRead(SENSE_BAT));
+        if (bat_new != bat_old) {
+          displayBat(bat_new);
+          bat_old = bat_new;
+        }
+      }
     }
+  
+    //snake mode
+    else if (mode == 3) {
+      if (game_running) {
+        updateGame();
+        snake_dir += buttonIncrement;
+        dir_check();
+      }
+      else {
+        waitForPress();    // display the snake start up screen
+        placeScran();  // place first bit of food
+        game_running = 1;
+      }
+    }
+  
+  
+  
+    //networking mode (make email visible for NFC and pulse LEDs)
     else {
-      waitForPress();    // display the snake start up screen
-      placeScran();  // place first bit of food
-      game_running = 1;
+      //maybe call led stuff?
     }
   }
-
-
-
-  //networking mode (make email visible for NFC and pulse LEDs)
-  else {
-    //maybe call led stuff?
-  }
-
+  
   //update input values
   encPush_old = encPush_new;
   push1_old = push1_new;
