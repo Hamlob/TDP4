@@ -9,7 +9,7 @@
 
 // defining pins and creating display + encoder objects
 #define SCREEN_WIDTH 128        // OLED display width, in pixels
-#define SCREEN_HEIGHT 64        // OLED display height, in pixels
+#define SCREEN_HEIGHT 32        // OLED display height, in pixels
 
 #define OLED_RESET  8
 //#define OLED_DC     6           //SPI interface pins + display object creation with default MISO, MOSI, CLK pins (see docs for bit-bang SPI)
@@ -67,10 +67,10 @@ uint8_t intensity = 10;                  //intensity ranging from 1-10
 
 //int letterIndex = 0;                                                  //index keeping track of which letter is currently being edited
 //uint8_t row, column = 0;
-const uint8_t maxlength = 10;                                             //maximum length of the firstname or lastname
+const uint8_t maxlength = 20;                                             //maximum length of the firstname or lastname
 //bool edit = 0;
 
-char username[2][maxlength + 1] = {"__________", "__________"};      //column length must account for string end character
+char username[maxlength + 1] = {"Peter Konecny       "};      //column length must account for string end character
 
 uint8_t mode = 0;                                                   //variable keeping track of which mode the device is in; 0 for adjusting discpline, 1 for editing name
 bool encPush_old, push1_old, push2_old, encA_old, encB_old;               // old values of the inputs, internally pulled up so = 1
@@ -85,32 +85,68 @@ const uint8_t vib_intensity = 255;              //0-255 range
 bool vibrating = false;
 
 int count = 0;                              //counter for slower battery update
-const float divider_ratio = 10 / 13.3;      //ratio between actual and measured value because of the voltage divider used
+#define DIVIDER_RATIO   (10/13.3)      //ratio between actual and measured value because of the voltage divider used
 uint8_t bat_new, bat_old;                   //variables holding the percentage of battery
 
 
 //NFC global variables
-byte serialOutputBuffer[100];
+byte serialOutputBuffer[50];
 int bufferPointer = 0;
-byte storedText[100];
 bool isShowingEmail = false; //replace this with networking mode?
-
+const char network_text[] = "Scan for e-mail";
 
 #define CHARGE_AREA_START_X     20
-#define CHARGE_AREA_START_Y     18
+#define CHARGE_AREA_START_Y     9
 #define CHARGE_AREA_WIDTH       83
-#define CHARGE_AREA_HEIGHT      28
+#define CHARGE_AREA_HEIGHT      14
 #define BATTERY_FRAME_START_X   16
-#define BATTERY_FRAME_START_Y   16
+#define BATTERY_FRAME_START_Y   8
 #define BATTERY_FRAME_WIDTH     88
-#define BATTERY_FRAME_HEIGHT    32
+#define BATTERY_FRAME_HEIGHT    16
 #define BATTERY_TIP_START_X     105
-#define BATTERY_TIP_START_Y     24
+#define BATTERY_TIP_START_Y     12
 #define BATTERY_TIP_WIDTH       4
-#define BATTERY_TIP_HEIGHT      16
+#define BATTERY_TIP_HEIGHT      8
 
+//---------------SNAKE variables--------------------------------------------------
 
-const char network_text[] = "Scan for e-mail";
+bool game_running = 0;
+
+// define directions
+#define DIRUP     1       // these values is what the "snake" looks at to decide-
+#define DIRRIGHT  2
+#define DIRDOWN   3       // the direction the snake will travel
+#define DIRLEFT   4
+
+// set button variables
+
+// volitile cos we need it to update with the interupt so can be any bit of cycle value
+// is never higher than 4 so only need 8bit int to save resources
+volatile uint8_t snake_dir = 0;
+// snake ints
+byte snakePosX[30]; // array to make body of snake
+byte snakePosY[30];
+
+int snakeX = 30;     // snake head position
+int snakeY = 30;
+int snakeSize = 1;   // snake size count limited to the size of the array
+
+// world ints
+
+uint8_t worldMinX = 0;        // these set the limits of the play area
+uint8_t worldMaxX = SCREEN_WIDTH -1;
+uint8_t worldMinY = 10;
+uint8_t worldMaxY = SCREEN_HEIGHT - 1;
+
+// collect scran(food) and position of scran
+bool scranAte = 0;
+uint8_t scranPosX = 0;
+uint8_t scranPosY = 0;
+
+// scores variables
+long playscore = 0;
+long highscore = 30;  // set high score to 3 collect as a starting point
+
 
 //---------------------------------NFC FUNCTIONS--------------------------------------------------
 
@@ -133,7 +169,7 @@ int parseText(byte* data, byte size, bool isNDEF, bool doPrint = false, int Pack
     serialOutputBuffer[bufferPointer] = data[i];
     if (data[i] == 0xFE) { //if ndef text end character
 
-      for (int i = bufferPointer + 1; i < 100; i++) { //purges remainder of old buffer
+      for (int i = bufferPointer + 1; i < 50; i++) { //purges remainder of old buffer
         serialOutputBuffer[i] = 0;
       }
       if (doPrint) {
@@ -217,8 +253,29 @@ int readText(bool doPrint = true, bool isNDEF = true, int addr = 0x0, bool findE
   return endPointer + 16 * (packetCounter - 1); //returns byte number of 0xFE end character
 }
 
+//parses data from storedText variable to username variable, splitting by space and ending with end char | (0x7C)
+void updateName(byte *text) {
+  //int nameRow = 0;
+  //int j = 0;
+  for (int i = 0; i < 50; i++) {
+//    if (text[i] == 0x20) { // space char separates first name from last name
+//      nameRow = 1;
+//      j = 0;
+//    }
+    if (text[i] == 0x7C) { // | char separates email from name
+      break;
+    }
+    username[i] = text[i];
+    //username[nameRow][j] = text[i];
+    //j += 1;
+  }
+}
+
+
 //function which when called checks if a new name has been written, if so displays the name, stores it in 0x30 in eeprom and purges NDEF record from 0x0...
 void preserveName() {
+
+  byte storedText[50];
   byte readeeprom[9];
   bool newText = false;
   int endPointer = readText(false, true, 0x0); //reads memory to find text, updating the buffer string, returns end pointer
@@ -237,18 +294,18 @@ void preserveName() {
     }
   }
   if (newText) {
-    erase(endPointer + 1, 109, false);
-    for (int j = 0; j < 100; j++) {
+    erase(endPointer + 1, 59, false);
+    for (int j = 0; j < 50; j++) {
       storedText[j] = serialOutputBuffer[j];
     }
-    if (ntag.writeEeprom(0x30 * 16, storedText, 100)) {
+    if (ntag.writeEeprom(0x30 * 16, storedText, 50)) {
       //Serial.println("New Name Stored");
 
     } else {
       Serial.println("Name not stored");
     }
-    erase(0, 109);
-    updateName();
+    erase(0, 59);
+    updateName(storedText);
   }
 }
 
@@ -307,45 +364,6 @@ void toggleShowEmail() {
 
 
 
-//---------------SNAKE variables--------------------------------------------------
-
-bool game_running = 0;
-
-// define directions
-#define DIRUP     1       // these values is what the "snake" looks at to decide-
-#define DIRRIGHT  2
-#define DIRDOWN   3       // the direction the snake will travel
-#define DIRLEFT   4
-
-// set button variables
-
-// volitile cos we need it to update with the interupt so can be any bit of cycle value
-// is never higher than 4 so only need 8bit int to save resources
-volatile uint8_t snake_dir = 0;
-// snake ints
-byte snakePosX[30]; // array to make body of snake
-byte snakePosY[30];
-
-int snakeX = 30;     // snake head position
-int snakeY = 30;
-int snakeSize = 1;   // snake size count limited to the size of the array
-
-// world ints
-
-uint8_t worldMinX = 0;        // these set the limits of the play area
-uint8_t worldMaxX = SCREEN_WIDTH;
-uint8_t worldMinY = 10;
-uint8_t worldMaxY = SCREEN_HEIGHT - 1;
-
-// collect scran(food) and position of scran
-bool scranAte = 0;
-uint8_t scranPosX = 0;
-uint8_t scranPosY = 0;
-
-// scores variables
-long playscore = 0;
-long highscore = 30;  // set high score to 3 collect as a starting point
-
 //---------------SNAKE FUNCTIONS-----------------------------------------
 
 //----------------------------read input----------------------------------------
@@ -402,12 +420,12 @@ void updateDisplay()  // draw scores and outlines
   display.print(String(highscore , DEC));
   // draw play area
   //        pos  1x,1y, 2x,2y,colour
-  display.drawLine(0, 0, 127, 0, WHITE); // very top border
-  display.drawLine(63, 0, 63, 9, WHITE); // score seperator
-  display.drawLine(0, 9, 127, 9, WHITE); // below text border
-  display.drawLine(0, 63, 127, 63, WHITE); // bottom border
-  display.drawLine(0, 0, 0, 63, WHITE); // left border
-  display.drawLine(127, 0, 127, 63, WHITE); //right border
+  display.drawLine(0, 0, worldMaxX, 0, WHITE); // very top border
+  display.drawLine(worldMaxY, 0, worldMaxY, 9, WHITE); // score seperator
+  display.drawLine(0, 9, worldMaxX, 9, WHITE); // below text border
+  display.drawLine(0, worldMaxY, worldMaxX, worldMaxY, WHITE); // bottom border
+  display.drawLine(0, 0, 0, worldMaxY, WHITE); // left border
+  display.drawLine(worldMaxX, 0, worldMaxX, worldMaxY, WHITE); //right border
 
 
 
@@ -461,10 +479,10 @@ void updateGame()     // this updates the game area display
       snakeY += 1;
       break;
     case DIRLEFT:
-      snakeX -= 1;
+      snakeX -= 2;
       break;
     case DIRRIGHT:
-      snakeX += 1;
+      snakeX += 2;
       break;
   }
 
@@ -480,7 +498,7 @@ void updateGame()     // this updates the game area display
 
 void placeScran()
 {
-  scranPosX = random(worldMinX + 1, worldMaxX - 1);
+  scranPosX = 2*random(worldMinX + 1, worldMaxX/2);
   scranPosY = random(worldMinY + 1, worldMaxY - 1);
 
 }
@@ -514,15 +532,13 @@ void gameOver()
   uint8_t rectX1, rectY1, rectX2, rectY2;
 
   rectX1 = 38;
-  rectY1 = 28;
+  rectY1 = 14;
   rectX2 = 58;
-  rectY2 = 12;
+  rectY2 = 10;
   display.clearDisplay();
-  display.setCursor(40, 30);
+  display.setCursor(40, 15);
   display.setTextSize(1);
-  tone(HAP, 2000, 50);
   display.print("GAME ");
-  tone(HAP, 1000, 50);
   display.print("OVER");
 
   if (playscore >= highscore) //check to see if score higher than high score
@@ -534,13 +550,11 @@ void gameOver()
   for (int i = 0; i <= 16; i++) // this is to draw rectanlges around game over
   {
     display.drawRect(rectX1, rectY1, rectX2, rectY2, WHITE);
-    Serial.println("if loop");
     display.display();
     rectX1 -= 2;    // shift over by 2 pixels
-    rectY1 -= 2;
+    rectY1 -= 1;
     rectX2 += 4;    // shift over 2 pixels from last point
-    rectY2 += 4;
-    tone(HAP, i * 200, 3);
+    rectY2 += 2;
   }
   display.display();
 
@@ -566,7 +580,7 @@ void gameOver()
   snakeX = display.width() / 2;
   snakeY = display.height() / 2;
 
-  waitForPress();        // wait for player to start game
+  game_running = 0;
 
 }
 //-------------------------wait for presss loop -------------------------
@@ -581,25 +595,26 @@ void waitForPress()
 
     drawALineForMe(WHITE); // draw a random white line
     drawALineForMe(BLACK); // draw a random black line so that the screen not completely fill white
-    display.fillRect(19, 20, 90, 32, BLACK);    // blank background for text
+    display.fillRect(40, 11, 55, 10, BLACK);    // blank background for 'snake' text
+    display.fillRect(19, 21, 90, 10, BLACK);    // blank background for 'press any key' text
     display.setTextColor(WHITE);
-    display.setCursor(35, 25);
-    display.setTextSize(2); // bigger font
+    display.setCursor(54, 12);
+    display.setTextSize(1); // bigger font
     display.println("SNAKE");
     //    x  y   w  h r  col
-    display.drawRoundRect(33, 22, 62, 20, 4, WHITE); // border Snake
-    display.drawRect(19, 20, 90, 32, WHITE);      // border box  - 3
-    display.setCursor(25, 42);
+    display.drawRoundRect(40, 11, 55, 10, 4, WHITE); // border Snake
+    display.drawRect(19, 21, 90, 10, WHITE);      // border box  - 3
+    display.setCursor(25, 21);
     display.setTextSize(0);                       // font back to normal
     display.println("press any key");
-    display.fillRect(0, 0, 127, 8, BLACK);
+    display.fillRect(0, 0, 127, 4, BLACK);
     display.setCursor(10, 0);
     display.print("High Score :");                // display the high score
     display.print(highscore);
     display.display();
     waiting = digitalRead(PUSHB_1) && digitalRead(PUSHB_2);  // if any of the keys is pressed, its value goes to 0 and PUSHB1&&PUSHB2 will be 0 too
     if (fallingEdge(encPush_old, encPush_new)) {
-      mode = 3;
+      mode = 0;
       displayNameDisc();
       waiting = 0;
     }
@@ -623,7 +638,7 @@ void drawALineForMe(uint8_t clr)
   display.drawLine(line1X, line1Y, line2X, line2Y, clr);
 }
 
-//-------------------------------------  collision detecion -------------------------------
+////-------------------------------------  collision detecion -------------------------------
 bool selfCollision()
 {
   for (byte i = 4; i < snakeSize; i++)
@@ -723,12 +738,15 @@ void checkIndex() {
 //  }
 //}
 
-void checkIntensity() {
-  if (intensity > 10) {
+void updateIntensity(int increment) {
+  if ((intensity + increment)> 10) {
     intensity = 10;
   }
-  else if (intensity < 1) {
-    intensity = 1;
+  else if (intensity + increment < 0) {
+    intensity = 0;
+  }
+  else{
+    intensity += increment;
   }
 }
 
@@ -745,32 +763,14 @@ void writeString(const char *text, uint8_t size = 1) {
   return;
 }
 
-//parses data from storedText variable to username variable, splitting by space and ending with end char | (0x7C)
-void updateName() {
-  int nameRow = 0;
-  int j = 0;
-  for (int i = 0; i < 100; i++) {
-    if (storedText[i] == 0x20) { // space char separates first name from last name
-      nameRow = 1;
-      j = 0;
-    }
-    if (storedText[i] == 0x7C) { // | char separates email from name
-      break;
-    }
-    username[nameRow][j] = storedText[i];
-    j += 1;
-  }
-}
 
 void displayNameDisc() {
   display.clearDisplay();
 
   display.setCursor(0, 0);
-  writeString(username[0], 2);
-  display.setCursor(0, 20);
-  writeString(username[1], 2);
+  writeString(username, 1);
 
-  display.setCursor(0, 40);
+  display.setCursor(0, 10);
   writeString(disc);
   writeString(ENG);
 
@@ -862,13 +862,14 @@ int encRead() {
 }
 
 uint8_t batPercent(uint16_t value) {
-  float analog_value = value * (3.3 / 1023) * (1 / divider_ratio);             //convert to original analog range
+  float analog_value = (value * 3.3) / 1023 * (1.0 / DIVIDER_RATIO);             //convert to original analog range
+  Serial.println(value, DEC);
   uint8_t bat_percent;
-  if (analog_value < 3.1) {
-    bat_percent = 1;
+  if (analog_value < 3.0) {
+    bat_percent = 10;
   }
   else if (analog_value < 3.6) {                                         // 3.0-3.6 represents 0-10% range and is mostly linear
-    bat_percent = 0.5 + (analog_value - 3.0) / (3.6 - 3.0) * 10;
+    bat_percent = 1 + ((analog_value - 3.0) / (3.6 - 3.0)) * 10;
   }
   else if (analog_value < 4.2) {
     bat_percent = 0.5 + 4497.7 * pow(analog_value, 4) - 70268.1 * pow(analog_value, 3) + 411049.15 * pow(analog_value, 2) - 1066885.1 * (analog_value) + 1036586; //interpolating function using python
@@ -886,7 +887,10 @@ void displayBat(uint8_t percentage) {
   uint8_t width;
   width = (percentage * CHARGE_AREA_WIDTH) / 100;
   display.fillRect(CHARGE_AREA_START_X, CHARGE_AREA_START_Y, width, CHARGE_AREA_HEIGHT, SSD1306_WHITE);
-  display.setCursor(0, 0);
+  display.setCursor(50, 12);
+  display.setTextColor(SSD1306_INVERSE);  
+  char perc_str[5] = {percentage/100 + '0', percentage/10 + '0', percentage%10 + '0', '%', '\0'};
+  writeString(perc_str);
 
   display.display();
 }
@@ -897,6 +901,7 @@ void displayNetwork() {
   display.clearDisplay();
   display.setCursor(0, 0);
   writeString(network_text);
+  display.display();
 }
 
 //----------MAIN------------------------------------------------------------------------------------------
@@ -943,6 +948,7 @@ void setup() {
 
   encPush_old = push1_old = push2_old = encA_old = 1;
   encPush_new = push1_new = push2_new = encA_new = 1;
+  bat_old = 100;
   Serial.println("buttons updated");
 
   displaySetup();         //setups the display
@@ -971,6 +977,10 @@ void loop() {
   if (fallingEdge(encPush_old, encPush_new)) {
     mode += 1;
     vibrate_twice();
+    if (mode != 2 && isShowingEmail){
+      toggleShowEmail();
+      isShowingEmail = !isShowingEmail;
+    }
     if (mode == 0) {
       preserveName();
       displayNameDisc();
@@ -981,6 +991,7 @@ void loop() {
     }
     else if (mode == 2) {
       toggleShowEmail();
+      isShowingEmail = !isShowingEmail;
       displayNetwork();
       //      ledOscillate(); or maybe leave in loop?
     }
@@ -1039,8 +1050,7 @@ void loop() {
       discIndex += buttonIncrement;
       checkIndex();                           //make sure the index is within the range of disciplines
       updateData(discIndex);                  //update the discipline and color accordingly
-      intensity += encIncrement;
-      checkIntensity();
+      updateIntensity(encIncrement);
       ledOut((intensity * color[0]) / 10, (intensity * color[1]) / 10, (intensity * color[2]) / 10); //display the color on LED
       //      }
       displayNameDisc();                      //comment out for debugging
@@ -1060,8 +1070,6 @@ void loop() {
       bat_new = batPercent(analogRead(SENSE_BAT));
       if (bat_new != bat_old) {
         displayBat(bat_new);
-      }
-      else {
         bat_old = bat_new;
       }
     }
