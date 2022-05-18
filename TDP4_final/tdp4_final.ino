@@ -56,7 +56,7 @@ const char EEE[] = "Electronics and Electrical";
 const char AER[] = "Aeronautical";
 const char CIV[] = "Civil";
 const char PDE[] = "Product Design";
-const char ENG[] = " Engineering";          //ENG will be appended at the eng of each discipline to save memory
+const char ENG[] = " ";          //ENG will be appended at the eng of each discipline to save memory
 
 
 const char *disc = &ENG[0];                 // not-constant pointer to a constant discipline string (to its first character)
@@ -1021,10 +1021,11 @@ void setup() {
   //ledOut(color[0], color[1], color[2]);
   //Serial.println("leds done");
   disc = &EEE[0];
-  //displayNameDisc();
-  displayMenu();
-  Serial.println("menu displayed");
+  
+  //displayMenu();
+  //Serial.println("menu displayed");
   preserveName(true);
+  displayNameDisc();
 
 
 }
@@ -1045,7 +1046,6 @@ void loop() {
   if (fallingEdge(encPush_old, encPush_new)) {
     showMenu = !showMenu;
     vibrate_twice();
-    ledOut(0, 0, 0);
     if (showMenu){
       if (isShowingEmail){
         toggleShowEmail();
