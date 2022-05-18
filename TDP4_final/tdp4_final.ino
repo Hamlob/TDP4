@@ -3,6 +3,8 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <ntagsramadapter.h>
+#include <arduino-timer.h>
+
 //#define HARDI2C
 
 
@@ -62,7 +64,7 @@ const char ENG[] = " ";          //ENG will be appended at the eng of each disci
 const char *disc = &ENG[0];                 // not-constant pointer to a constant discipline string (to its first character)
 const uint8_t nDisc = 5;                    //total number of disciplines
 int discIndex = 1;                          //discipline ID
-uint8_t color[3] = {55, 55, 55};         //char array holding {R,G,B} components of the color respectively
+//uint8_t color[3] = {0, 0, 0};         //char array holding {R,G,B} components of the color respectively
 uint8_t intensity = 10;                  //intensity ranging from 1-10
 
 //int letterIndex = 0;                                                  //index keeping track of which letter is currently being edited
@@ -73,7 +75,7 @@ const uint8_t maxlength = 20;                                             //maxi
 //char username[maxlength + 1] = {"Peter Konecny       "};      //column length must account for string end character
 char username[maxlength + 1] = {"Please program name "};      //column length must account for string end character
 
-const char mode_text[4][6] = {"Badge","Batt","Email","Snake"};
+const char mode_text[4][6] = {"Name", "Batt", "Email", "Snake"};
 bool showMenu = 0;                                                  //decides wheter the menu should be showing or not
 uint8_t mode = 0;                                                   //variable keeping track of which mode the device is in; 0 for adjusting discpline, 1 for editing name
 bool encPush_old, push1_old, push2_old, encA_old, encB_old;               // old values of the inputs, internally pulled up so = 1
@@ -137,7 +139,7 @@ int snakeSize = 1;   // snake size count limited to the size of the array
 // world ints
 
 uint8_t worldMinX = 0;        // these set the limits of the play area
-uint8_t worldMaxX = SCREEN_WIDTH -1;
+uint8_t worldMaxX = SCREEN_WIDTH - 1;
 uint8_t worldMinY = 10;
 uint8_t worldMaxY = SCREEN_HEIGHT - 1;
 
@@ -150,7 +152,103 @@ uint8_t scranPosY = 0;
 long playscore = 0;
 long highscore = 30;  // set high score to 3 collect as a starting point
 
+//---------------------------------LEDs--------------------------------------------------------
+Timer<1> LEDtimer;
+Timer<1> scheduleLEDs;
 
+uint8_t rBaseLevel = 255;
+uint8_t gBaseLevel = 50;
+uint8_t bBaseLevel = 150;
+
+float r = 255;
+float g = 255;
+float b = 255;
+bool LEDup = false;
+
+
+void staticLEDOut(uint8_t r, uint8_t g, uint8_t b) {
+  //input: value of how prominent each color should be (0-255)
+  //output: PWM driving RGB leds; each color will be driven separately by PWM with duty cycle 0-100% depending on the char value (0->0%, 255->100%)
+
+  analogWrite(LED_R, r);
+  analogWrite(LED_G, g);
+  analogWrite(LED_B, b);
+  return;
+}
+
+//float calculateNewIntensity(float oldIntensity, int speedModifier, int baseLevel) {
+//  return oldIntensity + speedModifier * float(baseLevel) / 255;
+//}
+
+float calculateNewIntensity(float oldIntensity, int speedModifier, int baseLevel) {
+  float newIntensity = oldIntensity + speedModifier * float(baseLevel) / 255;
+  if (newIntensity < 0) {
+    return 0;
+  } else if (newIntensity > 255.1) {
+    return 255;
+  }
+  else{ 
+    return newIntensity;
+  }
+}
+bool ledOut(void *speedModifier) {
+  //input: speedModifier +ve for brightening and -ve for dimming
+  //output: true for stop the timer callback, false for continue
+  int multiplier = int(speedModifier);
+  staticLEDOut(int(r), int(g), int(b));
+
+
+  r = calculateNewIntensity(r, multiplier, rBaseLevel);
+  g = calculateNewIntensity(g, multiplier, gBaseLevel);
+  b = calculateNewIntensity(b, multiplier, bBaseLevel);
+
+
+  if (int(multiplier) < 0) { //improve this nested if block?
+    if (int(r) <= 0 && int(g) <= 0 && int(b) <= 0) {
+      r = 1; //avoids a flash which sometimes occurs if these go negative.
+      g = 1;
+      b = 1;
+      return false;
+    } else {
+      return true;
+    }
+  } else {
+    if (int(r) >= rBaseLevel && int(g)>=gBaseLevel &&int(b)>=bBaseLevel) {
+      return false;
+    } else {
+      return true;
+    }
+  }
+}
+
+
+bool flashLED(int speedModifier, bool goingUp, bool downUp = false) {
+  int modifier = speedModifier * (int(goingUp) - 0.5) * 2; // converts true false into 1 -1
+
+  if (!goingUp) { //if dimming
+    r = rBaseLevel;
+    g = gBaseLevel;
+    b = bBaseLevel;
+  } else if (goingUp) { //if brightening
+    r = 0;
+    g = 0;
+    b = 0;
+  }
+
+  LEDtimer.every(10, ledOut, (void *)modifier);
+
+  //  if (downUp) {
+  //    LEDtimer.every(20, ledOut, (void *)int(speedModifier * -0.5));
+  //  }
+  return true;
+}
+
+//function called by timer to either ramp up or ramp down leds
+bool scheduleUpDown(void *) {
+  Serial.println(LEDup);
+  flashLED(4, LEDup, false);
+  LEDup = !LEDup;
+}
 
 //---------------------------------NFC FUNCTIONS--------------------------------------------------
 
@@ -205,8 +303,8 @@ int parseText(byte* data, byte size, bool isNDEF, bool doPrint = false, int Pack
         bufferPointer = 0; //write over stored name with email
       }
     }
-    if (data[i] ==0x2A){ //if contains asterix, erase all memory
-      erase(0, 0x37*16, true);
+    if (data[i] == 0x2A) { //if contains asterix, erase all memory
+      erase(0, 0x37 * 16, true);
       return 0xFF;
     }
     serialOutputBuffer[bufferPointer] = data[i];
@@ -263,12 +361,12 @@ int readText(bool doPrint = true, bool isNDEF = true, int addr = 0x0, bool findE
 //parses data from storedText variable to username variable, splitting by space and ending with end char | (0x7C)
 void updateName(byte *text) {
   //int nameRow = 0;
-  bool found=false;
+  bool found = false;
   int j = 0;
   for (int i = 0; i < maxlength; i++) {
     if (text[i] == 0x7C) { // | char separates email from name
       found = true;
-      for (int j=i; j<maxlength; j++){//clear rest of username
+      for (int j = i; j < maxlength; j++) { //clear rest of username
         username[j] = 0x20;
       }
       break;
@@ -282,18 +380,18 @@ void updateName(byte *text) {
 
 
 //function which when called checks if a new name has been written, if so displays the name, stores it in 0x30 in eeprom and purges NDEF record from 0x0...
-void preserveName(bool startup=false) {
+void preserveName(bool startup = false) {
   Serial.println("preserveName");
   byte storedText[50];
   byte readeeprom[9];
   bool newText = false;
   int endPointer;
-  
-  if (startup){
+
+  if (startup) {
     readText(false, true, 0x30);
     newText = true;
-  }else{
-    endPointer= readText(false, true, 0x0); //reads memory to find text, updating the buffer string, returns end pointer
+  } else {
+    endPointer = readText(false, true, 0x0); //reads memory to find text, updating the buffer string, returns end pointer
   }
   if (endPointer == 0xFF) { //if no new text has been written, skip
     //Serial.println("skipping rest of preserve name, no tag found");
@@ -321,8 +419,8 @@ void preserveName(bool startup=false) {
       Serial.println("Name not stored");
     }
     erase(0, 109);
-    if (startup && storedText[0]==0){ //if starting up and no name stored don't update username. keep the please program messsage.
-    //if (startup){  
+    if (startup && storedText[0] == 0) { //if starting up and no name stored don't update username. keep the please program messsage.
+      //if (startup){
       return;
     }
     updateName(storedText);
@@ -518,7 +616,7 @@ void updateGame()     // this updates the game area display
 
 void placeScran()
 {
-  scranPosX = 2*random(worldMinX + 1, worldMaxX/2);
+  scranPosX = 2 * random(worldMinX + 1, worldMaxX / 2);
   scranPosY = random(worldMinY + 1, worldMaxY - 1);
 
 }
@@ -695,38 +793,38 @@ void updateData(int discIndex) {
   {
     case 1:
       disc = &MECH[0];    //change the pointer to point at the first character of MECH array
-      color[0] = 0;
-      color[1] = 0;
-      color[2] = 255;
+      rBaseLevel = 1;
+      gBaseLevel = 1;
+      bBaseLevel = 255;
       break;
     case 2:
       disc = &EEE[0];
-      color[0] = 255;
-      color[1] = 0;
-      color[2] = 0;
+      rBaseLevel = 255;
+      gBaseLevel = 1;
+      bBaseLevel = 1;
       break;
     case 3:
       disc = &AER[0];
-      color[0] = 0;
-      color[1] = 255;
-      color[2] = 0;
+      rBaseLevel = 1;
+      gBaseLevel = 255;
+      bBaseLevel = 1;
       break;
     case 4:
       disc = &CIV[0];
-      color[0] = 0;
-      color[1] = 255;
-      color[2] = 255;
+      rBaseLevel = 1;
+      gBaseLevel = 255;
+      bBaseLevel = 255;
       break;
     case 5:
       disc = &PDE[0];
-      color[0] = 255;
-      color[1] = 0;
-      color[2] = 255;
+      rBaseLevel = 255;
+      gBaseLevel = 1;
+      bBaseLevel = 255;
       break;
     default:
-      color[0] = 255;
-      color[1] = 255;
-      color[2] = 255;
+      rBaseLevel = 255;
+      gBaseLevel = 255;
+      bBaseLevel = 255;
   }
 
   return;
@@ -758,17 +856,17 @@ void checkIndex() {
 //  }
 //}
 
-void updateIntensity(int increment) {
-  if ((intensity + increment)> 10) {
-    intensity = 10;
-  }
-  else if (intensity + increment < 0) {
-    intensity = 0;
-  }
-  else{
-    intensity += increment;
-  }
-}
+//void updateIntensity(int increment) {
+//  if ((intensity + increment) > 10) {
+//    intensity = 10;
+//  }
+//  else if (intensity + increment < 0) {
+//    intensity = 0;
+//  }
+//  else {
+//    intensity += increment;
+//  }
+//}
 
 void writeString(const char *text, uint8_t size = 1) {
   //displays name and discipline on the display, starting at the x, y cursor position
@@ -837,36 +935,36 @@ void vibrate_twice() {
   delay(vib_duration);
   analogWrite(HAP, 0);
 }
-
-void intensityAdjust() {
-  if ((color[0] - 25) < 0) {
-    color[0] = 0;
-  }
-  else if ((color[0] + 25) > 255) {
-    color[0] = 255;
-  }
-  else {
-    color[0] = color[0] + encIncrement * 25;
-  }
-  if ((color[1] - 25) < 0) {
-    color[1] = 0;
-  }
-  else if ((color[1] + 25) > 255) {
-    color[1] = 255;
-  }
-  else {
-    color[1] = color[1] + encIncrement * 25;
-  }
-  if ((color[2] - 25) < 0) {
-    color[2] = 0;
-  }
-  else if ((color[2] + 25) > 255) {
-    color[2] = 255;
-  }
-  else {
-    color[2] = color[2] + encIncrement * 25;
-  }
-}
+//
+//void intensityAdjust() {
+//  if ((color[0] - 25) < 0) {
+//    color[0] = 0;
+//  }
+//  else if ((color[0] + 25) > 255) {
+//    color[0] = 255;
+//  }
+//  else {
+//    color[0] = color[0] + encIncrement * 25;
+//  }
+//  if ((color[1] - 25) < 0) {
+//    color[1] = 0;
+//  }
+//  else if ((color[1] + 25) > 255) {
+//    color[1] = 255;
+//  }
+//  else {
+//    color[1] = color[1] + encIncrement * 25;
+//  }
+//  if ((color[2] - 25) < 0) {
+//    color[2] = 0;
+//  }
+//  else if ((color[2] + 25) > 255) {
+//    color[2] = 255;
+//  }
+//  else {
+//    color[2] = color[2] + encIncrement * 25;
+//  }
+//}
 
 bool fallingEdge(bool old_value, bool new_value) {
   return (old_value == 1 && new_value == 0);
@@ -909,8 +1007,8 @@ void displayBat(uint8_t percentage) {
   width = (percentage * CHARGE_AREA_WIDTH) / 100;
   display.fillRect(CHARGE_AREA_START_X, CHARGE_AREA_START_Y, width, CHARGE_AREA_HEIGHT, SSD1306_WHITE);
   display.setCursor(50, 12);
-  display.setTextColor(SSD1306_INVERSE);  
-  char perc_str[5] = {percentage/100 + '0', percentage/10 + '0', percentage%10 + '0', '%', '\0'};
+  display.setTextColor(SSD1306_INVERSE);
+  char perc_str[5] = {percentage / 100 + '0', percentage / 10 + '0', percentage % 10 + '0', '%', '\0'};
   writeString(perc_str);
 
   display.display();
@@ -925,45 +1023,45 @@ void displayNetwork() {
   display.display();
 }
 
-void displayMenu(){
+void displayMenu() {
   display.clearDisplay();
   display.drawRect(2, 1, 58, 14, SSD1306_WHITE);          //mode 0 rectangle
   display.drawRect(64, 1, 58, 14, SSD1306_WHITE);          //mode 1 rectangle
   display.drawRect(64, 16, 58, 14, SSD1306_WHITE);          //mode 2 rectangle
   display.drawRect(2, 16, 58, 14, SSD1306_WHITE);          //mode 3 rectangle
-  
-  if (mode <2){
-    display.fillRect(2 + 62*(mode%2), 1 + 15*(mode/2), 58, 14, SSD1306_WHITE);
+
+  if (mode < 2) {
+    display.fillRect(2 + 62 * (mode % 2), 1 + 15 * (mode / 2), 58, 14, SSD1306_WHITE);
   }
-  else if (mode == 2){
+  else if (mode == 2) {
     display.fillRect(64, 16, 58, 14, SSD1306_WHITE);
   }
-  else{
+  else {
     display.fillRect(2, 16, 58, 14, SSD1306_WHITE);
   }
-  
+
   display.setTextColor(SSD1306_INVERSE);
-  display.setCursor(15,3);
+  display.setCursor(15, 3);
   writeString(mode_text[0]);
-  display.setCursor(75,3);
+  display.setCursor(75, 3);
   writeString(mode_text[1]);
-  display.setCursor(15,18);
+  display.setCursor(15, 18);
   writeString(mode_text[3]);
-  display.setCursor(75,18);
+  display.setCursor(75, 18);
   writeString(mode_text[2]);
   display.display();
-  
+
 }
 
 
 void updateMode(int increment) {
-  if ((mode + increment)> 3) {
+  if ((mode + increment) > 3) {
     mode = 0;
   }
   else if (mode + increment < 0) {
     mode = 3;
   }
-  else{
+  else {
     mode += increment;
   }
 }
@@ -1018,12 +1116,8 @@ void setup() {
 
   displaySetup();         //setups the display
   Serial.println("display setup");
-  //ledOut(color[0], color[1], color[2]);
-  //Serial.println("leds done");
   disc = &EEE[0];
-  
-  //displayMenu();
-  //Serial.println("menu displayed");
+  flashLED(4, true, false);
   preserveName(true);
   displayNameDisc();
 
@@ -1035,6 +1129,8 @@ void setup() {
 void loop() {
 
   buttonIncrement = 0;
+  LEDtimer.tick();
+  scheduleLEDs.tick();
 
   //check for inputs
   encPush_new = digitalRead(ENC_PUSH);
@@ -1043,20 +1139,25 @@ void loop() {
   encA_new = digitalRead(ENC_A);
 
 
+
   if (fallingEdge(encPush_old, encPush_new)) {
+    //LEDup = true;
+    scheduleLEDs.cancel();
+    LEDtimer.cancel();
+    flashLED(4, true, false);
     showMenu = !showMenu;
     vibrate_twice();
-    if (showMenu){
-      if (isShowingEmail){
+    if (showMenu) {
+      if (isShowingEmail) { //cancels showing email if exiting networking mode into menu
         toggleShowEmail();
       }
       displayMenu();
     }
-    else{
+    else {
       if (mode == 0) {
         preserveName();
         displayNameDisc();
-        ledOut((intensity * color[0]) / 10, (intensity * color[1]) / 10, (intensity * color[2]) / 10); //display the color on LED
+
       }
       else if (mode == 1) {
         bat_new = batPercent(analogRead(SENSE_BAT));
@@ -1065,7 +1166,8 @@ void loop() {
       else if (mode == 2) {
         toggleShowEmail();
         displayNetwork();
-        //      ledOscillate(); or maybe leave in loop?
+        LEDup = false;
+        scheduleLEDs.every(1000, scheduleUpDown);
       }
       else if (mode == 3) {
         game_running = 0;
@@ -1076,7 +1178,7 @@ void loop() {
       }
     }
   }
-  
+
   if (fallingEdge(push1_old, push1_new)) {
     buttonIncrement += 1;
   }
@@ -1105,21 +1207,21 @@ void loop() {
   //  }
 
 
-//showing menu
-  if (showMenu){
-    if (encIncrement !=0){
+  //showing menu
+  if (showMenu) {
+    if (encIncrement != 0) {
       updateMode(encIncrement);
       displayMenu();
     }
   }
 
-//one of the MODEs selected
-  else{  
- 
+  //one of the MODEs selected
+  else {
+
     // mode for displaying name and discipline
     if (mode == 0) {
       if (buttonIncrement != 0 || encIncrement != 0) {    //if there is an input
-  
+
         //edit mode; LED OFF
         //      if (edit) {
         //        letterIndex += buttonIncrement;
@@ -1128,29 +1230,30 @@ void loop() {
         //        column = letterIndex % maxlength;
         //        username[row][column] += encIncrement;
         //      }
-  
+
         //display only mode; LED ON
         //      else {
         vibrate(1);
         discIndex += buttonIncrement;
         checkIndex();                           //make sure the index is within the range of disciplines
         updateData(discIndex);                  //update the discipline and color accordingly
-        updateIntensity(encIncrement);
-        ledOut((intensity * color[0]) / 10, (intensity * color[1]) / 10, (intensity * color[2]) / 10); //display the color on LED
+        //updateIntensity(encIncrement);
+        //ledOut((intensity * color[0]) / 10, (intensity * color[1]) / 10, (intensity * color[2]) / 10); //display the color on LED
         //      }
+        flashLED(4, true, false);
         displayNameDisc();                      //comment out for debugging
         //button_values();                      //used for debugging
       }
-  
+
       //polling in main mode
       fd_new = !digitalRead(NFC_FD); //active low
       if (fallingEdge(fd_old, fd_new) && (!isShowingEmail)) { //if nfc field removed i.e process finished and not showing email, update
         preserveName();
         displayNameDisc();
       }
-      fd_old=fd_new;
+      fd_old = fd_new;
     }
-  
+
     //mode for displaying battery
     else if (mode == 1) {
       if (count > 2000) {
@@ -1161,7 +1264,7 @@ void loop() {
         }
       }
     }
-  
+
     //snake mode
     else if (mode == 3) {
       if (game_running) {
@@ -1170,20 +1273,21 @@ void loop() {
         dir_check();
       }
       else {
+        flashLED(4, true, false);
         waitForPress();    // display the snake start up screen
         placeScran();  // place first bit of food
         game_running = 1;
       }
     }
-  
-  
-  
+
+
+
     //networking mode (make email visible for NFC and pulse LEDs)
     else {
-      //maybe call led stuff?
+
     }
   }
-  
+
   //update input values
   encPush_old = encPush_new;
   push1_old = push1_new;
