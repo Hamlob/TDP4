@@ -150,8 +150,8 @@ uint8_t scranPosX = 0;
 uint8_t scranPosY = 0;
 
 // scores variables
-long playscore = 0;
-long highscore = 30;  // set high score to 3 collect as a starting point
+int playscore = 0;
+int highscore = 30;  // set high score to 3 collect as a starting point
 
 //---------------------------------LEDs--------------------------------------------------------
 Timer<1> LEDtimer;
@@ -722,6 +722,7 @@ void waitForPress()
   while (waiting)
 
   {
+    LEDtimer.tick();
     encPush_new = digitalRead(ENC_PUSH);
 
     drawALineForMe(WHITE); // draw a random white line
@@ -745,6 +746,7 @@ void waitForPress()
     display.display();
     waiting = digitalRead(PUSHB_1) && digitalRead(PUSHB_2);  // if any of the keys is pressed, its value goes to 0 and PUSHB1&&PUSHB2 will be 0 too
     if (fallingEdge(encPush_old, encPush_new)) {
+      flashLED(4, true, false);
       showMenu = 1;
       displayMenu();
       waiting = 0;
@@ -1183,6 +1185,8 @@ void loop() {
       }
       else if (mode == 3) {
         game_running = 0;
+        LEDtimer.cancel(); //cancels default fade up and replaces with faster to deal with game loop being slow
+        flashLED(8, true, false);
       }
       else {
         mode = 0;
@@ -1295,7 +1299,6 @@ void loop() {
         dir_check();
       }
       else {
-        flashLED(4, true, false);
         waitForPress();    // display the snake start up screen
         placeScran();  // place first bit of food
         game_running = 1;
@@ -1306,7 +1309,7 @@ void loop() {
 
     //networking mode (make email visible for NFC and pulse LEDs)
     else {
-
+      //do nothing. oscillating leds setup with timer in mode setup. email already set to show
     }
   }
 
