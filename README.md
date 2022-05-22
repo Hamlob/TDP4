@@ -1,5 +1,5 @@
-# TDP4 Group 5. Open Day Badge
-Electronic Team Design Project 4. Group 5. 
+# Open Day Badge TDP4 Group 5
+Electronic Team Design Project 4.
 
 Required libraries:<br />
 https://github.com/adafruit/Adafruit_SSD1306 <br />
